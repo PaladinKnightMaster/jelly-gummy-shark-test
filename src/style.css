@@ -1,0 +1,80 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #f3eee6;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: default;
+}
+
+#modes {
+  position: fixed;
+  left: 50%;
+  top: max(3.2vh, calc(env(safe-area-inset-top) + 14px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 18px;
+  z-index: 2;
+  font-family: "Avenir Next", "Segoe UI", "Gill Sans", "Trebuchet MS", sans-serif;
+}
+
+#modes button {
+  margin: 0;
+  padding: 0 0 3px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: rgba(92, 62, 56, 0.38);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+
+#modes button[aria-pressed="true"] {
+  color: rgba(92, 62, 56, 0.82);
+  border-bottom-color: rgba(92, 62, 56, 0.45);
+}
+
+#hint {
+  position: fixed;
+  left: 50%;
+  top: max(8vh, calc(env(safe-area-inset-top) + 42px));
+  transform: translateX(-50%);
+  margin: 0;
+  font-family: "Avenir Next", "Segoe UI", "Gill Sans", "Trebuchet MS", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  color: rgba(92, 62, 56, 0.5);
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+#hint.hide {
+  opacity: 0;
+}
+
+@media (max-width: 700px) {
+  #modes button,
+  #hint {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-indent: 0.18em;
+  }
+}
