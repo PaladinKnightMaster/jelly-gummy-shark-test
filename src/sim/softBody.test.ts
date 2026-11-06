@@ -60,17 +60,30 @@ describe("gummy shark body", () => {
     body.maxY = 4;
     const snout = snoutIndex(body);
     const tail = tailIndex(body);
+    let mid = 0;
+    let midScore = Infinity;
+    body.particles.forEach((p, i) => {
+      const score = Math.abs(p.restX - 0.35) + Math.abs(p.restY) * 3;
+      if (score < midScore) {
+        midScore = score;
+        mid = i;
+      }
+    });
     const origin = body.particles[snout];
     const tailX = body.particles[tail].x;
+    const midX = body.particles[mid].x;
     expect(body.beginGrab(origin.x, origin.y)).toBe(true);
     for (let i = 0; i < 18; i++) {
       body.moveGrab(origin.restX + 0.95, origin.restY, 0.2, 0);
       body.step(1 / 60);
     }
     const snoutShift = body.particles[snout].x - origin.restX;
+    const midShift = Math.abs(body.particles[mid].x - midX);
     const tailShift = Math.abs(body.particles[tail].x - tailX);
     expect(snoutShift).toBeGreaterThan(0.55);
-    expect(tailShift).toBeLessThan(snoutShift * 0.45);
+    expect(midShift).toBeGreaterThan(0.12);
+    expect(midShift).toBeLessThan(snoutShift * 0.75);
+    expect(tailShift).toBeLessThan(midShift * 0.45);
   });
 
   it("carries the whole shark while the pinched snout still leads", () => {
@@ -99,7 +112,7 @@ describe("gummy shark body", () => {
     }
   });
 
-  it("drops onto the floor, squashes, and pops back up", () => {
+  it("drops onto the floor, shortens, and stays down", () => {
     const body = createSoftBody();
     body.setMode("drop");
     body.minX = -4;
@@ -123,28 +136,24 @@ describe("gummy shark body", () => {
     }
     let touched = false;
     let minSpan = restSpan;
-    let rose = false;
-    let prev = body.center().y;
-    let deepest = -Infinity;
+    let leftFloor = false;
     for (let i = 0; i < 180; i++) {
       body.step(1 / 60);
       const bottom = Math.max(...body.particles.map((p) => p.y));
-      const comY = body.center().y;
       if (bottom > body.maxY - 0.08) {
         touched = true;
         minSpan = Math.min(minSpan, spanOf());
-        deepest = Math.max(deepest, comY);
       }
-      if (touched && deepest - comY > 0.1 && comY < prev) rose = true;
-      prev = comY;
+      if (touched && bottom < body.maxY - 0.06) leftFloor = true;
       for (const p of body.particles) {
         expect(Number.isFinite(p.x)).toBe(true);
         expect(Number.isFinite(p.y)).toBe(true);
       }
     }
     expect(touched).toBe(true);
-    expect(minSpan).toBeLessThan(restSpan * 0.9);
-    expect(rose).toBe(true);
+    expect(minSpan).toBeLessThan(restSpan * 0.94);
+    expect(leftFloor).toBe(false);
+    expect(body.meanSpeed).toBeLessThan(1.2);
   });
 
   it("recovers toward the resting snout after a pull", () => {
@@ -203,6 +212,7 @@ describe("gummy shark body", () => {
 
   it("keeps a fast flick inside the room and finite", () => {
     const body = createSoftBody();
+    body.setMode("drop");
     body.minX = -3.2;
     body.maxX = 3.2;
     body.minY = -2.2;

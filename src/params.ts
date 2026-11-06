@@ -29,13 +29,15 @@ export const PARAMS = {
   pressure: 0.28,
   /** Material radius of a grab, in world units. */
   grabSigma: 0.27,
-  /** How quickly grabbed material moves to the pointer each substep. 1 is instant. */
-  grabFollow: 0.94,
+  /** How wide a pull's stretch spreads, in world units. Wider than a pinch, shorter than the body. */
+  pullSigma: 0.62,
+  /** How quickly pulled material takes its share of the pinch, per substep. */
+  pullFollow: 0.55,
   /**
    * In pull mode, how hard distant candy stays seated each substep.
    * The pinched spot still follows the pointer.
    */
-  holdAnchor: 0.44,
+  holdAnchor: 0.3,
   /** In drop mode, how quickly the whole shark catches the hand, per substep. */
   carryFollow: 0.22,
   maxSpeed: 11,
@@ -46,20 +48,17 @@ export const PARAMS = {
   restitution: 0.16,
   /** Fraction of wall penetration removed per substep. */
   wallPush: 0.42,
-  /** Floor contact. Firmer than the side walls so a landing can compress. */
-  floorPush: 0.9,
-  /**
-   * Share of impact speed returned upward. Low, so a gummy hops once
-   * instead of launching.
-   */
-  floorPop: 0.58,
-  /** Impact speed above which the body compresses and rebounds. */
-  impactSpeed: 2.45,
+  /** Floor contact removes the hit. A gummy shortens and stops. */
+  floorPush: 0.95,
+  /** Downward speed that starts a soft landing, so the body can shorten. */
+  impactSpeed: 1,
   breathAmp: 0.014,
   breathOmega: 1.7,
   idleSpeed: 0.22,
   /** Angular spring back toward the original upright pose, in 1/s^2 per radian. */
   uprightK: 12,
+  /** Share of the shape target taken from the full resting silhouette. */
+  silhouette: 0.84,
   /** Shape-matching spring strengths. Local clusters keep the shark recognizable. */
   globalK: 10,
   globalWeight: 0.28,

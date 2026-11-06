@@ -69,7 +69,7 @@ export class SoftBody {
   private lastH = 1 / 60;
   private idleTime = 0;
   private impactFatigue = 0;
-  private pendingPop = 0;
+  private clearOfFloor = true;
   private readonly intro: boolean;
   private readonly restBottom: number;
   private readonly restComX: number;
@@ -159,7 +159,7 @@ export class SoftBody {
     this.idleTime = 0;
     this.meanSpeed = 0;
     this.impactFatigue = 0;
-    this.pendingPop = 0;
+    this.clearOfFloor = true;
     if (this.intro) this.poseIntro();
   }
 
@@ -253,9 +253,21 @@ export class SoftBody {
     if (!this.grab) return;
     const { vx, vy } = this.grab;
     const sp = Math.hypot(vx, vy);
+    const h = this.lastH;
+    if (this.mode === "pull") {
+      for (const p of this.particles) {
+        const w = this.grabWeight(p, PARAMS.pullSigma);
+        if (w < 0.04) continue;
+        const cvx = ((p.x - p.px) / h) * (1 - w);
+        const cvy = ((p.y - p.py) / h) * (1 - w);
+        p.px = p.x - cvx * h;
+        p.py = p.y - cvy * h;
+      }
+      this.grab = null;
+      return;
+    }
     if (sp > PARAMS.flickSpeed) {
       const extra = Math.min(PARAMS.flickBoost, ((sp - PARAMS.flickSpeed) / PARAMS.flickSpeed) * PARAMS.flickBoost);
-      const h = this.lastH;
       for (const p of this.particles) {
         const w = this.grabWeight(p);
         if (w < 0.04) continue;
@@ -301,7 +313,8 @@ export class SoftBody {
         gx = com.x + (gx - com.x) * (1 - breath * 0.42);
         gy = com.y + (gy - com.y) * (1 + breath);
       }
-      const k = this.goalK[i] / w;
+      const held = this.grab && this.mode === "pull" ? 0.2 : 1;
+      const k = (this.goalK[i] / w) * held;
       const spin = this.uprightAlpha();
       const ax =
         (gx - p.x) * k + (this.homeX - com.x) * PARAMS.comKX - (p.y - com.y) * spin;
@@ -336,6 +349,7 @@ export class SoftBody {
     this.applyGrab(h, true);
     this.anchorHeld();
     this.solveWalls(h);
+    this.settle(h);
     this.limitSpeed(h);
     this.updateStrain();
   }
@@ -357,6 +371,11 @@ export class SoftBody {
       }
       cx /= m;
       cy /= m;
+      if (cluster.name === "global") {
+        const seated = this.poseCenter(cx, cy);
+        cx = seated.x;
+        cy = seated.y;
+      }
       let h00 = 0;
       let h01 = 0;
       let h10 = 0;
@@ -387,6 +406,70 @@ export class SoftBody {
         this.goalK[index] += cluster.k * cluster.weight;
       }
     }
+    this.applySilhouette();
+    this.plantGoals();
+  }
+
+  /**
+   * A pull springs back to the seated pose. A drop keeps the pose on the
+   * moving center so a throw can travel and a landing can stay where it fell.
+   */
+  private poseCenter(cx: number, cy: number): { x: number; y: number } {
+    if (this.mode === "pull") return { x: this.homeX, y: this.homeY };
+    return { x: cx, y: cy };
+  }
+
+  /**
+   * Local clusters follow whatever stack they have collapsed into. Mix the
+   * full-body rest pose back in so a landing can unsquash without hopping.
+   */
+  private applySilhouette(): void {
+    const global = this.clusters.find((cluster) => cluster.name === "global");
+    if (!global) return;
+    let cx = 0;
+    let cy = 0;
+    let m = 0;
+    for (const index of global.indices) {
+      const p = this.particles[index];
+      cx += p.x * p.mass;
+      cy += p.y * p.mass;
+      m += p.mass;
+    }
+    cx /= m;
+    cy /= m;
+    const seated = this.poseCenter(cx, cy);
+    cx = seated.x;
+    cy = seated.y;
+    const share = PARAMS.silhouette;
+    for (let n = 0; n < global.indices.length; n++) {
+      const index = global.indices[n];
+      const w = this.goalW[index];
+      if (w < 1e-6) continue;
+      const gx = cx + global.r00 * global.localX[n] + global.r01 * global.localY[n];
+      const gy = cy + global.r10 * global.localX[n] + global.r11 * global.localY[n];
+      const bx = this.goalX[index] / w;
+      const by = this.goalY[index] / w;
+      this.goalX[index] = (bx + (gx - bx) * share) * w;
+      this.goalY[index] = (by + (gy - by) * share) * w;
+    }
+  }
+
+  /**
+   * Shape goals are built around the current center, which can sit inside the
+   * floor after a landing. Lift the whole pose so the belly rests on the floor
+   * instead of being pulled through it.
+   */
+  private plantGoals(): void {
+    let lowest = -Infinity;
+    for (let i = 0; i < this.particles.length; i++) {
+      const w = this.goalW[i];
+      if (w < 1e-6) continue;
+      lowest = Math.max(lowest, this.goalY[i] / w);
+    }
+    const floor = this.maxY - 0.012;
+    if (lowest <= floor) return;
+    const lift = lowest - floor;
+    for (let i = 0; i < this.particles.length; i++) this.goalY[i] -= lift * this.goalW[i];
   }
 
   private uprightAlpha(): number {
@@ -432,9 +515,11 @@ export class SoftBody {
         }
         continue;
       }
+      const give = this.impactFatigue > 0.12 ? 0.22 : 1;
+      const stiffness = c.stiffness * give;
       const hi = c.limit ? c.rest * PARAMS.maxStretch : Infinity;
       const lo = c.limit ? c.rest * PARAMS.minStretch : 0;
-      let target = c.rest + (dist - c.rest) * (1 - c.stiffness);
+      let target = c.rest + (dist - c.rest) * (1 - stiffness);
       if (dist > hi) target = hi;
       else if (dist < lo) target = lo;
       let delta = dist - target;
@@ -456,7 +541,8 @@ export class SoftBody {
     if (!Number.isFinite(area) || area <= this.restArea * 0.2) return;
     const diff = this.restArea - area;
     const scale = clamp(diff / this.restArea, -0.35, 0.45);
-    const mag = PARAMS.pressure * scale * 0.22;
+    const yieldScale = this.impactFatigue > 0.12 ? 0.2 : 1;
+    const mag = PARAMS.pressure * scale * 0.22 * yieldScale;
     if (Math.abs(mag) < 1e-5) return;
     const com = this.center();
     const b = this.boundary;
@@ -480,57 +566,42 @@ export class SoftBody {
   private solveWalls(h: number): void {
     let impact = 0;
     let contacts = 0;
+    let lowest = -Infinity;
     for (const p of this.particles) {
       this.bounce(p, "x", this.minX, 1, h, PARAMS.wallPush, PARAMS.restitution);
       this.bounce(p, "x", this.maxX, -1, h, PARAMS.wallPush, PARAMS.restitution);
       this.bounce(p, "y", this.minY, 1, h, PARAMS.wallPush, PARAMS.restitution);
+      lowest = Math.max(lowest, p.y);
       const vy = (p.y - p.py) / h;
       if (p.y > this.maxY - 0.04 && vy > 0.25) {
         contacts += 1;
         impact = Math.max(impact, vy);
       }
-      const give = vy > PARAMS.impactSpeed ? 0.2 : 0.08;
-      this.bounce(p, "y", this.maxY, -1, h, PARAMS.floorPush, give);
+      this.bounce(p, "y", this.maxY, -1, h, PARAMS.floorPush, 0);
     }
-    if (contacts >= 3 && impact > PARAMS.impactSpeed && this.impactFatigue <= 0 && this.pendingPop <= 0) {
-      this.land(impact, h);
-    }
-    if (this.pendingPop > 0) {
-      this.pendingPop = Math.max(0, this.pendingPop - h);
-      if (this.pendingPop === 0) this.releasePop(h);
+    if (lowest < this.maxY - 0.18) this.clearOfFloor = true;
+    if (this.clearOfFloor && contacts >= 1 && impact > PARAMS.impactSpeed && this.impactFatigue <= 0) {
+      this.land(h);
+      this.clearOfFloor = false;
     }
     if (this.impactFatigue > 0) this.impactFatigue = Math.max(0, this.impactFatigue - h);
   }
 
-  /** Stops the belly and lets the rest of the candy fall into it. */
-  private land(impact: number, h: number): void {
+  /**
+   * Inelastic contact. Downward speed at the floor is removed, so the candy
+   * shortens under its own weight and stays down.
+   */
+  private land(h: number): void {
     const floor = this.maxY;
     for (const p of this.particles) {
       if (p.invMass === 0) continue;
       if (p.y > floor) p.y = floor;
-      const above = Math.max(0, floor - p.y);
-      if (above > 0.28) continue;
+      const above = floor - p.y;
+      if (above > 0.22) continue;
       const vy = (p.y - p.py) / h;
-      if (vy <= 0) continue;
-      const kept = vy * 0.04;
-      p.py = p.y - kept * h;
+      if (vy > 0) p.py = p.y;
     }
-    this.pendingPop = Math.min(0.09, 0.045 + impact * 0.008);
-    this.impactFatigue = this.pendingPop + 0.05;
-  }
-
-  /** The squashed candy springs off the floor once, without a second chatter. */
-  private releasePop(h: number): void {
-    const boost = Math.min(2.15, 1.35 + PARAMS.floorPop);
-    const floor = this.maxY;
-    for (const p of this.particles) {
-      if (p.invMass === 0) continue;
-      const above = Math.max(0, floor - p.y);
-      const closeness = clamp(1 - above / 1.6, 0.72, 1);
-      const vy = (p.y - p.py) / h;
-      const nv = Math.min(vy, -boost * closeness);
-      p.py = p.y - nv * h;
-    }
+    this.impactFatigue = 0.55;
   }
 
   private bounce(
@@ -542,20 +613,31 @@ export class SoftBody {
     push: number,
     restitution: number,
   ): void {
-    const pos = p[axis];
-    const pen = (wall - pos) * inward;
+    const before = p[axis];
+    const pen = (wall - before) * inward;
     if (pen <= 0) return;
+    p[axis] = before + pen * push * inward;
     const prevKey = axis === "x" ? "px" : "py";
-    p[axis] += pen * push * inward;
-    const vel = (p[axis] - p[prevKey]) / h;
+    const vel = (before - p[prevKey]) / h;
     const outward = vel * inward < 0;
-    if (outward) {
-      p[prevKey] = p[axis] - -vel * restitution * h;
-    }
+    const nv = outward ? -vel * restitution : vel;
+    p[prevKey] = p[axis] - nv * h;
     const tangent = axis === "x" ? "y" : "x";
     const prevTangent = tangent === "x" ? "px" : "py";
     const tv = (p[tangent] - p[prevTangent]) / h;
     p[prevTangent] = p[tangent] - tv * 0.82 * h;
+  }
+
+  /** Once a landing has finished deforming, throw away the leftover vertical rattle. */
+  private settle(h: number): void {
+    if (this.grab || this.impactFatigue > 0) return;
+    let bottom = -Infinity;
+    for (const p of this.particles) bottom = Math.max(bottom, p.y);
+    if (bottom < this.maxY - 0.04) return;
+    for (const p of this.particles) {
+      const vy = (p.y - p.py) / h;
+      p.py = p.y - vy * 0.35 * h;
+    }
   }
 
   private limitSpeed(h: number): void {
@@ -595,13 +677,14 @@ export class SoftBody {
   }
 
   /**
-   * Positional pull toward the shape-matched pose. Edge constraints can
-   * lock a folded outline; this runs after them so the silhouette unwinds.
-   * Velocity is kept, so a flick still overshoots instead of snapping flat.
+   * Positional pull toward the resting silhouette. Runs after edge constraints
+   * so a fold can unwind. Particles already on the floor are not lifted, so
+   * the candy unsquashes in place instead of hopping.
    */
   private projectShape(h: number): void {
     this.computeGoals();
-    const pull = this.grab ? 0.012 : this.impactFatigue > 0 ? 0.03 : 0.045;
+    const pull = this.grab && this.mode === "pull" ? 0.008 : this.impactFatigue > 0 ? 0.012 : 0.045;
+    const floor = this.maxY;
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       if (p.invMass === 0) continue;
@@ -612,8 +695,12 @@ export class SoftBody {
       const gy = this.goalY[i] / w;
       const vx = (p.x - p.px) / h;
       const vy = (p.y - p.py) / h;
+      const planted = p.y > floor - 0.05;
       p.x += (gx - p.x) * t;
-      p.y += (gy - p.y) * t;
+      let nextY = p.y + (gy - p.y) * t;
+      if (nextY > floor) nextY = floor;
+      if (planted && nextY < p.y) nextY = p.y;
+      p.y = nextY;
       p.px = p.x - vx * h;
       p.py = p.y - vy * h;
     }
@@ -667,9 +754,10 @@ export class SoftBody {
       grab.carryX = seatX;
       grab.carryY = seatY;
     }
-    const anchor = this.mode === "drop" ? PARAMS.holdAnchor * 0.8 : PARAMS.holdAnchor;
+    const anchor = this.mode === "drop" ? 0.32 : PARAMS.holdAnchor;
+    const sigma = this.mode === "pull" ? PARAMS.pullSigma : PARAMS.grabSigma;
     for (const p of this.particles) {
-      const keep = (1 - this.grabWeight(p)) * anchor;
+      const keep = (1 - this.grabWeight(p, sigma)) * anchor;
       if (keep <= 0.001) continue;
       const vx = (p.x - p.px) / h;
       const vy = (p.y - p.py) / h;
@@ -692,15 +780,15 @@ export class SoftBody {
       grab.r10 = cluster.r10;
       grab.r11 = cluster.r11;
     }
-    if (!pinOnly) {
+    if (!pinOnly && this.mode === "drop") {
       for (const p of this.particles) {
-        const w = this.grabWeight(p);
+        const w = this.grabWeight(p, PARAMS.grabSigma);
         if (w < 0.03) continue;
         const lx = p.restX - grab.restX;
         const ly = p.restY - grab.restY;
         const gx = grab.x + grab.r00 * lx + grab.r01 * ly;
         const gy = grab.y + grab.r10 * lx + grab.r11 * ly;
-        const t = w * PARAMS.grabFollow;
+        const t = w * 0.9;
         p.x += (gx - p.x) * t;
         p.y += (gy - p.y) * t;
         const vx = (p.x - p.px) / h;
@@ -711,6 +799,25 @@ export class SoftBody {
         p.py = p.y - nvy * h;
       }
     }
+    if (!pinOnly && this.mode === "pull") {
+      const seatX = this.homeX - this.restComX;
+      const seatY = this.homeY - this.restComY;
+      const dx = grab.x - (grab.restX + seatX);
+      const dy = grab.y - (grab.restY + seatY);
+      for (const p of this.particles) {
+        const w = this.grabWeight(p, PARAMS.pullSigma);
+        if (w < 0.03) continue;
+        const tx = p.restX + seatX + dx * w;
+        const ty = p.restY + seatY + dy * w;
+        const t = PARAMS.pullFollow * (0.3 + 0.7 * w);
+        p.x += (tx - p.x) * t;
+        p.y += (ty - p.y) * t;
+        const vx = (p.x - p.px) / h;
+        const vy = (p.y - p.py) / h;
+        p.px = p.x - vx * h;
+        p.py = p.y - vy * h;
+      }
+    }
     const p = this.particles[grab.index];
     p.x = grab.x;
     p.y = grab.y;
@@ -718,11 +825,10 @@ export class SoftBody {
     p.py = p.y - grab.vy * h;
   }
 
-  private grabWeight(p: Particle): number {
+  private grabWeight(p: Particle, sigma = PARAMS.grabSigma): number {
     if (!this.grab) return 0;
     const dx = p.restX - this.grab.restX;
     const dy = p.restY - this.grab.restY;
-    const sigma = PARAMS.grabSigma;
     return Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
   }
 
