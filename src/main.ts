@@ -3,7 +3,9 @@ import { createSoftBody, type SoftBody } from "./sim/softBody";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#stage");
 const hint = document.querySelector<HTMLElement>("#hint");
-if (!canvas || !hint) throw new Error("Missing stage");
+const pullButton = document.querySelector<HTMLButtonElement>("#mode-pull");
+const dropButton = document.querySelector<HTMLButtonElement>("#mode-drop");
+if (!canvas || !hint || !pullButton || !dropButton) throw new Error("Missing stage");
 const ctx = canvas.getContext("2d", { alpha: false });
 if (!ctx) throw new Error("Canvas unavailable");
 
@@ -19,6 +21,14 @@ let velX = 0;
 let velY = 0;
 let raf = 0;
 let running = true;
+let hintTimer = 0;
+
+function showHint(text: string): void {
+  hint!.textContent = text;
+  hint!.classList.remove("hide");
+  window.clearTimeout(hintTimer);
+  hintTimer = window.setTimeout(hideHint, 3400);
+}
 
 function sharkLength(width: number, height: number): number {
   if (width < 760) return Math.min(width * 0.74, height * 0.5);
@@ -118,7 +128,30 @@ if (debug) {
   });
 }
 
-window.setTimeout(hideHint, 3400);
+function chooseMode(mode: "pull" | "drop"): void {
+  body.setMode(mode);
+  pullButton!.setAttribute("aria-pressed", mode === "pull" ? "true" : "false");
+  dropButton!.setAttribute("aria-pressed", mode === "drop" ? "true" : "false");
+  showHint(mode === "pull" ? "pull a spot" : "lift and drop");
+}
+
+function onPullMode(event: PointerEvent): void {
+  event.stopPropagation();
+  chooseMode("pull");
+}
+
+function onDropMode(event: PointerEvent): void {
+  event.stopPropagation();
+  chooseMode("drop");
+}
+
+const onPullClick = (): void => chooseMode("pull");
+const onDropClick = (): void => chooseMode("drop");
+pullButton.addEventListener("pointerdown", onPullMode);
+dropButton.addEventListener("pointerdown", onDropMode);
+pullButton.addEventListener("click", onPullClick);
+dropButton.addEventListener("click", onDropClick);
+showHint("pull a spot");
 
 let lastFrame = performance.now();
 function frame(now: number): void {
@@ -139,6 +172,10 @@ function cleanup(): void {
   window.removeEventListener("pointerup", onPointerUp);
   window.removeEventListener("pointercancel", onPointerUp);
   window.removeEventListener("resize", resize);
+  pullButton!.removeEventListener("pointerdown", onPullMode);
+  dropButton!.removeEventListener("pointerdown", onDropMode);
+  pullButton!.removeEventListener("click", onPullClick);
+  dropButton!.removeEventListener("click", onDropClick);
 }
 
 if (import.meta.hot) import.meta.hot.dispose(cleanup);

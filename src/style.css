@@ -20,10 +20,41 @@ body {
   cursor: default;
 }
 
+#modes {
+  position: fixed;
+  left: 50%;
+  top: max(3.2vh, calc(env(safe-area-inset-top) + 14px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 18px;
+  z-index: 2;
+  font-family: "Avenir Next", "Segoe UI", "Gill Sans", "Trebuchet MS", sans-serif;
+}
+
+#modes button {
+  margin: 0;
+  padding: 0 0 3px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: rgba(92, 62, 56, 0.38);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+
+#modes button[aria-pressed="true"] {
+  color: rgba(92, 62, 56, 0.82);
+  border-bottom-color: rgba(92, 62, 56, 0.45);
+}
+
 #hint {
   position: fixed;
   left: 50%;
-  top: max(4vh, calc(env(safe-area-inset-top) + 18px));
+  top: max(8vh, calc(env(safe-area-inset-top) + 42px));
   transform: translateX(-50%);
   margin: 0;
   font-family: "Avenir Next", "Segoe UI", "Gill Sans", "Trebuchet MS", sans-serif;
@@ -40,9 +71,10 @@ body {
 }
 
 @media (max-width: 700px) {
+  #modes button,
   #hint {
     font-size: 12px;
-    letter-spacing: 0.2em;
-    text-indent: 0.2em;
+    letter-spacing: 0.18em;
+    text-indent: 0.18em;
   }
 }

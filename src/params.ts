@@ -32,12 +32,12 @@ export const PARAMS = {
   /** How quickly grabbed material moves to the pointer each substep. 1 is instant. */
   grabFollow: 0.94,
   /**
-   * While a point is held, fraction of the way distant particles move toward the
-   * carried pose each substep. The pinch leads; the rest of the candy follows.
+   * In pull mode, how hard distant candy stays seated each substep.
+   * The pinched spot still follows the pointer.
    */
-  holdAnchor: 0.36,
-  /** How quickly the whole shark catches the hand, per substep. Lower stretches more. */
-  carryFollow: 0.2,
+  holdAnchor: 0.44,
+  /** In drop mode, how quickly the whole shark catches the hand, per substep. */
+  carryFollow: 0.22,
   maxSpeed: 11,
   /** Pointer speed above which a release is treated as a flick. */
   flickSpeed: 2.6,
@@ -46,14 +46,15 @@ export const PARAMS = {
   restitution: 0.16,
   /** Fraction of wall penetration removed per substep. */
   wallPush: 0.42,
-  /** Floor contact. Firmer than the side walls so a landing can splat. */
-  floorPush: 0.92,
-  /** Upward kick, as a fraction of impact speed, on a hard landing. */
-  floorPop: 1.05,
-  /** Impact speed above which the body splats and rebounds. */
-  impactSpeed: 2.15,
-  /** How much of the height above the floor is pressed flat on a hard hit. */
-  impactSquash: 0.46,
+  /** Floor contact. Firmer than the side walls so a landing can compress. */
+  floorPush: 0.9,
+  /**
+   * Share of impact speed returned upward. Low, so a gummy hops once
+   * instead of launching.
+   */
+  floorPop: 0.58,
+  /** Impact speed above which the body compresses and rebounds. */
+  impactSpeed: 2.45,
   breathAmp: 0.014,
   breathOmega: 1.7,
   idleSpeed: 0.22,

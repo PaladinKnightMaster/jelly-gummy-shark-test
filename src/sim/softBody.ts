@@ -57,6 +57,7 @@ export class SoftBody {
   meanSpeed = 0;
   homeX = 0;
   homeY = 0;
+  mode: "pull" | "drop" = "pull";
 
   private readonly constraints: SharkMesh["constraints"];
   private readonly clusters: Cluster[];
@@ -68,6 +69,7 @@ export class SoftBody {
   private lastH = 1 / 60;
   private idleTime = 0;
   private impactFatigue = 0;
+  private pendingPop = 0;
   private readonly intro: boolean;
   private readonly restBottom: number;
   private readonly restComX: number;
@@ -157,7 +159,13 @@ export class SoftBody {
     this.idleTime = 0;
     this.meanSpeed = 0;
     this.impactFatigue = 0;
+    this.pendingPop = 0;
     if (this.intro) this.poseIntro();
+  }
+
+  setMode(mode: "pull" | "drop"): void {
+    if (this.grab) this.endGrab();
+    this.mode = mode;
   }
 
   private poseIntro(): void {
@@ -481,34 +489,48 @@ export class SoftBody {
         contacts += 1;
         impact = Math.max(impact, vy);
       }
-      const give = vy > PARAMS.impactSpeed ? 0.05 : 0.12;
+      const give = vy > PARAMS.impactSpeed ? 0.2 : 0.08;
       this.bounce(p, "y", this.maxY, -1, h, PARAMS.floorPush, give);
     }
-    if (contacts >= 3 && impact > PARAMS.impactSpeed && this.impactFatigue <= 0) {
+    if (contacts >= 3 && impact > PARAMS.impactSpeed && this.impactFatigue <= 0 && this.pendingPop <= 0) {
       this.land(impact, h);
+    }
+    if (this.pendingPop > 0) {
+      this.pendingPop = Math.max(0, this.pendingPop - h);
+      if (this.pendingPop === 0) this.releasePop(h);
     }
     if (this.impactFatigue > 0) this.impactFatigue = Math.max(0, this.impactFatigue - h);
   }
 
-  /** Flattens the candy against the floor, then kicks it back up. */
+  /** Stops the belly and lets the rest of the candy fall into it. */
   private land(impact: number, h: number): void {
-    const t = clamp((impact - PARAMS.impactSpeed) / 5.5, 0, 1);
-    const squash = PARAMS.impactSquash * (0.45 + 0.55 * t);
-    const kick = Math.min(5.4, impact * PARAMS.floorPop * (0.75 + 0.25 * t));
-    const hop = Math.min(0.42, kick * 0.13);
     const floor = this.maxY;
     for (const p of this.particles) {
       if (p.invMass === 0) continue;
-      const vx = (p.x - p.px) / h;
-      const above = floor - p.y;
-      if (above > 0) p.y += above * squash;
       if (p.y > floor) p.y = floor;
-      const closeness = clamp(1 - Math.max(0, floor - p.y) / 1.05, 0.62, 1);
-      p.y -= hop * closeness;
-      p.px = p.x - vx * h;
-      p.py = p.y - -kick * closeness * h;
+      const above = Math.max(0, floor - p.y);
+      if (above > 0.28) continue;
+      const vy = (p.y - p.py) / h;
+      if (vy <= 0) continue;
+      const kept = vy * 0.04;
+      p.py = p.y - kept * h;
     }
-    this.impactFatigue = 0.16;
+    this.pendingPop = Math.min(0.09, 0.045 + impact * 0.008);
+    this.impactFatigue = this.pendingPop + 0.05;
+  }
+
+  /** The squashed candy springs off the floor once, without a second chatter. */
+  private releasePop(h: number): void {
+    const boost = Math.min(2.15, 1.35 + PARAMS.floorPop);
+    const floor = this.maxY;
+    for (const p of this.particles) {
+      if (p.invMass === 0) continue;
+      const above = Math.max(0, floor - p.y);
+      const closeness = clamp(1 - above / 1.6, 0.72, 1);
+      const vy = (p.y - p.py) / h;
+      const nv = Math.min(vy, -boost * closeness);
+      p.py = p.y - nv * h;
+    }
   }
 
   private bounce(
@@ -635,18 +657,26 @@ export class SoftBody {
     const grab = this.grab;
     if (!grab) return;
     const h = this.lastH;
-    const follow = PARAMS.carryFollow;
-    grab.carryX += (grab.x - grab.restX - grab.carryX) * follow;
-    grab.carryY += (grab.y - grab.restY - grab.carryY) * follow;
+    const seatX = this.homeX - this.restComX;
+    const seatY = this.homeY - this.restComY;
+    if (this.mode === "drop") {
+      const follow = PARAMS.carryFollow;
+      grab.carryX += (grab.x - grab.restX - grab.carryX) * follow;
+      grab.carryY += (grab.y - grab.restY - grab.carryY) * follow;
+    } else {
+      grab.carryX = seatX;
+      grab.carryY = seatY;
+    }
+    const anchor = this.mode === "drop" ? PARAMS.holdAnchor * 0.8 : PARAMS.holdAnchor;
     for (const p of this.particles) {
-      const keep = (1 - this.grabWeight(p)) * PARAMS.holdAnchor;
+      const keep = (1 - this.grabWeight(p)) * anchor;
       if (keep <= 0.001) continue;
       const vx = (p.x - p.px) / h;
       const vy = (p.y - p.py) / h;
       p.x += (p.restX + grab.carryX - p.x) * keep;
       p.y += (p.restY + grab.carryY - p.y) * keep;
-      const nvx = vx + (grab.vx - vx) * keep;
-      const nvy = vy + (grab.vy - vy) * keep;
+      const nvx = this.mode === "drop" ? vx + (grab.vx - vx) * keep : vx;
+      const nvy = this.mode === "drop" ? vy + (grab.vy - vy) * keep : vy;
       p.px = p.x - nvx * h;
       p.py = p.y - nvy * h;
     }

@@ -12,7 +12,11 @@
   </head>
   <body>
     <canvas id="stage" aria-label="A soft gummy shark you can grab and stretch"></canvas>
-    <p id="hint">grab me</p>
+    <div id="modes" role="group" aria-label="Grab style">
+      <button type="button" id="mode-pull" aria-pressed="true">pull</button>
+      <button type="button" id="mode-drop" aria-pressed="false">drop</button>
+    </div>
+    <p id="hint">pull a spot</p>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

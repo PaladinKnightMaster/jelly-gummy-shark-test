@@ -51,8 +51,31 @@ describe("gummy shark body", () => {
     expect(Number.isFinite(eye.y)).toBe(true);
   });
 
+  it("pulls the snout and leaves the tail seated", () => {
+    const body = createSoftBody();
+    body.setMode("pull");
+    body.minX = -6;
+    body.maxX = 6;
+    body.minY = -4;
+    body.maxY = 4;
+    const snout = snoutIndex(body);
+    const tail = tailIndex(body);
+    const origin = body.particles[snout];
+    const tailX = body.particles[tail].x;
+    expect(body.beginGrab(origin.x, origin.y)).toBe(true);
+    for (let i = 0; i < 18; i++) {
+      body.moveGrab(origin.restX + 0.95, origin.restY, 0.2, 0);
+      body.step(1 / 60);
+    }
+    const snoutShift = body.particles[snout].x - origin.restX;
+    const tailShift = Math.abs(body.particles[tail].x - tailX);
+    expect(snoutShift).toBeGreaterThan(0.55);
+    expect(tailShift).toBeLessThan(snoutShift * 0.45);
+  });
+
   it("carries the whole shark while the pinched snout still leads", () => {
     const body = createSoftBody();
+    body.setMode("drop");
     body.minX = -6;
     body.maxX = 6;
     body.minY = -4;
@@ -78,6 +101,7 @@ describe("gummy shark body", () => {
 
   it("drops onto the floor, squashes, and pops back up", () => {
     const body = createSoftBody();
+    body.setMode("drop");
     body.minX = -4;
     body.maxX = 4;
     body.minY = -3;
@@ -101,17 +125,17 @@ describe("gummy shark body", () => {
     let minSpan = restSpan;
     let rose = false;
     let prev = body.center().y;
-    let contactCom = 0;
+    let deepest = -Infinity;
     for (let i = 0; i < 180; i++) {
       body.step(1 / 60);
       const bottom = Math.max(...body.particles.map((p) => p.y));
       const comY = body.center().y;
       if (bottom > body.maxY - 0.08) {
-        if (!touched) contactCom = comY;
         touched = true;
         minSpan = Math.min(minSpan, spanOf());
+        deepest = Math.max(deepest, comY);
       }
-      if (touched && comY < contactCom - 0.08 && comY < prev) rose = true;
+      if (touched && deepest - comY > 0.1 && comY < prev) rose = true;
       prev = comY;
       for (const p of body.particles) {
         expect(Number.isFinite(p.x)).toBe(true);
