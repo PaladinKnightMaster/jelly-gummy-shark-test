@@ -75,6 +75,20 @@ export function drawShark(
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, width, height);
 
+  const floorY = height / 2 + body.maxY * ppu;
+  const table = ctx.createLinearGradient(0, floorY - ppu * 0.55, 0, height);
+  table.addColorStop(0, "rgba(255,250,246,0)");
+  table.addColorStop(0.42, "rgba(214, 196, 176, 0.28)");
+  table.addColorStop(1, "rgba(186, 164, 142, 0.45)");
+  ctx.fillStyle = table;
+  ctx.fillRect(0, Math.max(0, floorY - ppu * 0.45), width, height);
+  ctx.beginPath();
+  ctx.moveTo(width * 0.08, floorY);
+  ctx.lineTo(width * 0.92, floorY);
+  ctx.strokeStyle = "rgba(140, 110, 90, 0.16)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
   const project = (p: Pt): [number, number] => [
     width / 2 + p.x * ppu,
     height / 2 + p.y * ppu,
@@ -86,23 +100,26 @@ export function drawShark(
   let maxY = -Infinity;
   let minX = Infinity;
   let maxX = -Infinity;
+  let lowest = -Infinity;
   for (const p of outline) {
     const [x, y] = project(p);
     minX = Math.min(minX, x);
     maxX = Math.max(maxX, x);
     minY = Math.min(minY, y);
     maxY = Math.max(maxY, y);
+    lowest = Math.max(lowest, p.y);
   }
 
   const com = body.center();
-  const lift = Math.max(0, body.homeY - com.y);
-  const shadowAlpha = 0.22 / (1 + lift * 1.15);
-
+  const gap = Math.max(0, body.maxY - lowest);
+  const shadowAlpha = 0.3 / (1 + gap * 1.35);
   ctx.save();
-  ctx.translate(ppu * 0.035, ppu * (0.1 + lift * 0.18));
+  ctx.translate(width / 2 + com.x * ppu, floorY - 2);
+  ctx.scale(1.02 + gap * 0.03, 0.14 + Math.min(gap, 1.1) * 0.05);
+  ctx.translate(-(width / 2 + com.x * ppu), -(height / 2 + com.y * ppu));
   ctx.fillStyle = `rgba(78, 32, 40, ${shadowAlpha})`;
-  ctx.shadowColor = `rgba(70, 28, 36, ${shadowAlpha + 0.05})`;
-  ctx.shadowBlur = 22 + lift * ppu * 0.25;
+  ctx.shadowColor = `rgba(70, 28, 36, ${shadowAlpha})`;
+  ctx.shadowBlur = 16 + gap * ppu * 0.22;
   ctx.fill(path);
   ctx.restore();
 

@@ -40,6 +40,8 @@ type Grab = {
   r01: number;
   r10: number;
   r11: number;
+  carryX: number;
+  carryY: number;
 };
 
 export class SoftBody {
@@ -65,14 +67,17 @@ export class SoftBody {
   private grab: Grab | null = null;
   private lastH = 1 / 60;
   private idleTime = 0;
+  private impactFatigue = 0;
   private readonly intro: boolean;
+  private readonly restBottom: number;
+  private readonly restComX: number;
+  private readonly restComY: number;
 
   constructor(mesh: SharkMesh, intro: boolean) {
     this.intro = intro;
     this.boundary = mesh.boundary;
     this.features = mesh.features;
     this.constraints = mesh.constraints;
-    this.homeY = -PARAMS.gravity / PARAMS.comK;
     this.particles = mesh.rest.map((p, i) => ({
       x: p.x,
       y: p.y,
@@ -85,6 +90,19 @@ export class SoftBody {
       thickness: mesh.thickness[i],
       strain: 1,
     }));
+    let restMass = 0;
+    let restCx = 0;
+    let restCy = 0;
+    let restBottom = -Infinity;
+    for (const p of this.particles) {
+      restMass += p.mass;
+      restCx += p.restX * p.mass;
+      restCy += p.restY * p.mass;
+      restBottom = Math.max(restBottom, p.restY);
+    }
+    this.restComX = restCx / restMass;
+    this.restComY = restCy / restMass;
+    this.restBottom = restBottom;
     this.clusters = mesh.clusters.map((cluster) => {
       let cx = 0;
       let cy = 0;
@@ -122,6 +140,7 @@ export class SoftBody {
     this.goalW = new Float64Array(n);
     this.goalK = new Float64Array(n);
     this.restArea = Math.abs(this.area());
+    this.homeY = this.maxY - this.restBottom - 0.02;
     if (intro) this.poseIntro();
   }
 
@@ -137,12 +156,13 @@ export class SoftBody {
     this.time = 0;
     this.idleTime = 0;
     this.meanSpeed = 0;
+    this.impactFatigue = 0;
     if (this.intro) this.poseIntro();
   }
 
   private poseIntro(): void {
     for (const p of this.particles) {
-      p.y -= 0.62;
+      p.y -= 0.85;
       p.px = p.x;
       p.py = p.y;
     }
@@ -191,6 +211,7 @@ export class SoftBody {
     const index = bestBoundaryD < 0.014 ? bestBoundary : best;
     const p = this.particles[index];
     const cluster = this.dominantCluster(index);
+    const com = this.center();
     this.grab = {
       index,
       restX: p.restX,
@@ -203,6 +224,8 @@ export class SoftBody {
       r01: cluster?.r01 ?? 0,
       r10: cluster?.r10 ?? 0,
       r11: cluster?.r11 ?? 1,
+      carryX: com.x - this.restComX,
+      carryY: com.y - this.restComY,
     };
     this.idleTime = 0;
     return true;
@@ -257,6 +280,7 @@ export class SoftBody {
   }
 
   private substep(h: number): void {
+    this.homeY = this.maxY - this.restBottom - 0.02;
     this.computeGoals();
     const breath = this.breathAmount();
     const com = this.center();
@@ -272,10 +296,10 @@ export class SoftBody {
       const k = this.goalK[i] / w;
       const spin = this.uprightAlpha();
       const ax =
-        (gx - p.x) * k + (this.homeX - com.x) * PARAMS.comK - (p.y - com.y) * spin;
+        (gx - p.x) * k + (this.homeX - com.x) * PARAMS.comKX - (p.y - com.y) * spin;
       const ay =
         (gy - p.y) * k +
-        (this.homeY - com.y) * PARAMS.comK +
+        (this.homeY - com.y) * PARAMS.comKY +
         PARAMS.gravity +
         (p.x - com.x) * spin;
       let vx = (p.x - p.px) / h;
@@ -446,24 +470,65 @@ export class SoftBody {
   }
 
   private solveWalls(h: number): void {
+    let impact = 0;
+    let contacts = 0;
     for (const p of this.particles) {
-      this.bounce(p, "x", this.minX, 1, h);
-      this.bounce(p, "x", this.maxX, -1, h);
-      this.bounce(p, "y", this.minY, 1, h);
-      this.bounce(p, "y", this.maxY, -1, h);
+      this.bounce(p, "x", this.minX, 1, h, PARAMS.wallPush, PARAMS.restitution);
+      this.bounce(p, "x", this.maxX, -1, h, PARAMS.wallPush, PARAMS.restitution);
+      this.bounce(p, "y", this.minY, 1, h, PARAMS.wallPush, PARAMS.restitution);
+      const vy = (p.y - p.py) / h;
+      if (p.y > this.maxY - 0.04 && vy > 0.25) {
+        contacts += 1;
+        impact = Math.max(impact, vy);
+      }
+      const give = vy > PARAMS.impactSpeed ? 0.05 : 0.12;
+      this.bounce(p, "y", this.maxY, -1, h, PARAMS.floorPush, give);
     }
+    if (contacts >= 3 && impact > PARAMS.impactSpeed && this.impactFatigue <= 0) {
+      this.land(impact, h);
+    }
+    if (this.impactFatigue > 0) this.impactFatigue = Math.max(0, this.impactFatigue - h);
   }
 
-  private bounce(p: Particle, axis: "x" | "y", wall: number, inward: 1 | -1, h: number): void {
+  /** Flattens the candy against the floor, then kicks it back up. */
+  private land(impact: number, h: number): void {
+    const t = clamp((impact - PARAMS.impactSpeed) / 5.5, 0, 1);
+    const squash = PARAMS.impactSquash * (0.45 + 0.55 * t);
+    const kick = Math.min(5.4, impact * PARAMS.floorPop * (0.75 + 0.25 * t));
+    const hop = Math.min(0.42, kick * 0.13);
+    const floor = this.maxY;
+    for (const p of this.particles) {
+      if (p.invMass === 0) continue;
+      const vx = (p.x - p.px) / h;
+      const above = floor - p.y;
+      if (above > 0) p.y += above * squash;
+      if (p.y > floor) p.y = floor;
+      const closeness = clamp(1 - Math.max(0, floor - p.y) / 1.05, 0.62, 1);
+      p.y -= hop * closeness;
+      p.px = p.x - vx * h;
+      p.py = p.y - -kick * closeness * h;
+    }
+    this.impactFatigue = 0.16;
+  }
+
+  private bounce(
+    p: Particle,
+    axis: "x" | "y",
+    wall: number,
+    inward: 1 | -1,
+    h: number,
+    push: number,
+    restitution: number,
+  ): void {
     const pos = p[axis];
     const pen = (wall - pos) * inward;
     if (pen <= 0) return;
     const prevKey = axis === "x" ? "px" : "py";
-    p[axis] += pen * PARAMS.wallPush * inward;
+    p[axis] += pen * push * inward;
     const vel = (p[axis] - p[prevKey]) / h;
     const outward = vel * inward < 0;
     if (outward) {
-      p[prevKey] = p[axis] - -vel * PARAMS.restitution * h;
+      p[prevKey] = p[axis] - -vel * restitution * h;
     }
     const tangent = axis === "x" ? "y" : "x";
     const prevTangent = tangent === "x" ? "px" : "py";
@@ -514,7 +579,7 @@ export class SoftBody {
    */
   private projectShape(h: number): void {
     this.computeGoals();
-    const pull = this.grab ? 0.012 : 0.045;
+    const pull = this.grab ? 0.012 : this.impactFatigue > 0 ? 0.03 : 0.045;
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       if (p.invMass === 0) continue;
@@ -567,17 +632,23 @@ export class SoftBody {
   }
 
   private anchorHeld(): void {
-    if (!this.grab) return;
+    const grab = this.grab;
+    if (!grab) return;
     const h = this.lastH;
+    const follow = PARAMS.carryFollow;
+    grab.carryX += (grab.x - grab.restX - grab.carryX) * follow;
+    grab.carryY += (grab.y - grab.restY - grab.carryY) * follow;
     for (const p of this.particles) {
       const keep = (1 - this.grabWeight(p)) * PARAMS.holdAnchor;
       if (keep <= 0.001) continue;
       const vx = (p.x - p.px) / h;
       const vy = (p.y - p.py) / h;
-      p.x += (p.restX - p.x) * keep;
-      p.y += (p.restY - p.y) * keep;
-      p.px = p.x - vx * h;
-      p.py = p.y - vy * h;
+      p.x += (p.restX + grab.carryX - p.x) * keep;
+      p.y += (p.restY + grab.carryY - p.y) * keep;
+      const nvx = vx + (grab.vx - vx) * keep;
+      const nvy = vy + (grab.vy - vy) * keep;
+      p.px = p.x - nvx * h;
+      p.py = p.y - nvy * h;
     }
   }
 

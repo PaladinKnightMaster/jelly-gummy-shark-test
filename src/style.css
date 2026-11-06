@@ -23,7 +23,7 @@ body {
 #hint {
   position: fixed;
   left: 50%;
-  bottom: max(5.5vh, calc(env(safe-area-inset-bottom) + 16px));
+  top: max(4vh, calc(env(safe-area-inset-top) + 18px));
   transform: translateX(-50%);
   margin: 0;
   font-family: "Avenir Next", "Segoe UI", "Gill Sans", "Trebuchet MS", sans-serif;
