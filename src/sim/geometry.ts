@@ -325,9 +325,12 @@ export function buildSharkMesh(): SharkMesh {
           const boundaryEdge =
             i < bCount && j < bCount && (Math.abs(i - j) === 1 || Math.abs(i - j) === bCount - 1);
           if (!boundaryEdge && !nearBoundary(mid.x, mid.y, boundary, 0.025)) continue;
+          // Long near-boundary bars are a hard scaffold so the outline cannot
+          // accordion. Short links stay soft: locking every one of them at
+          // once does not converge once the candy flattens.
           const edgeStiffness =
             i < bCount && j < bCount ? PARAMS.boundaryStiffness : PARAMS.distanceStiffness;
-          add(i, j, edgeStiffness, true);
+          add(i, j, edgeStiffness, d >= 0.09);
         }
       }
     }

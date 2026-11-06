@@ -16,38 +16,51 @@ export const PARAMS = {
   /** Extra drag that grows with speed, so flicks travel but do not fly forever. */
   quadDamp: 0.06,
   substeps: 3,
-  constraintIterations: 3,
-  /** Fractional correction of structural links per iteration, inside the stretch limit. */
-  distanceStiffness: 0.14,
-  boundaryStiffness: 0.28,
-  /** Gentle curvature links. Low, so the body can bend. */
-  bendStiffness: 0.045,
-  /** How far a structural link may stretch or compress before it locks. */
-  maxStretch: 1.62,
-  minStretch: 0.84,
-  /** How strongly area loss pushes the outline back out. */
-  pressure: 0.28,
-  /** Material radius of a grab, in world units. */
-  grabSigma: 0.27,
-  /** How wide a pull's stretch spreads, in world units. Wider than a pinch, shorter than the body. */
-  pullSigma: 0.62,
-  /** How quickly pulled material takes its share of the pinch, per substep. */
-  pullFollow: 0.55,
+  constraintIterations: 4,
   /**
-   * In pull mode, how hard distant candy stays seated each substep.
-   * The pinched spot still follows the pointer.
+   * Hard projections of over-stretched links after the grab.
+   * One sweep propagates the excess by about one edge, so a handful
+   * of sweeps is enough when the grab itself only moves a short step.
    */
-  holdAnchor: 0.3,
-  /** In drop mode, how quickly the whole shark catches the hand, per substep. */
-  carryFollow: 0.22,
-  maxSpeed: 11,
-  /** Pointer speed above which a release is treated as a flick. */
-  flickSpeed: 2.6,
-  /** Extra velocity multiplier applied to fast releases. */
-  flickBoost: 0.85,
-  restitution: 0.16,
-  /** Fraction of wall penetration removed per substep. */
-  wallPush: 0.42,
+  enforcePasses: 16,
+  /** Fractional correction of structural links per iteration, inside the stretch limit. */
+  distanceStiffness: 0.22,
+  boundaryStiffness: 0.42,
+  /** Gentle curvature links. Low, so the body can bend. */
+  bendStiffness: 0.05,
+  /**
+   * Structural links lock here. The grab is not allowed to leave an edge
+   * outside this band; the last solver pass projects every limited edge back in.
+   * minStretch is low enough for a landing to shorten the candy, and high
+   * enough that the outline cannot collapse into a ribbon.
+   */
+  maxStretch: 1.62,
+  minStretch: 0.72,
+  /** How strongly area loss pushes the outline back out. */
+  pressure: 0.42,
+  /**
+   * Material radius of a grab, in world units.
+   * Neighbors inside this radius share the pointer step; the tail does not.
+   */
+  grabSigma: 0.5,
+  /**
+   * Fraction of a pointer step applied to the whole body.
+   * The rest is a local stretch. Once the local edges are at their lock,
+   * this part is what keeps a sustained drag moving the shark instead of
+   * pinning it in a stretched pose.
+   */
+  carry: 0.34,
+  /**
+   * How fast the pinched region may chase the pointer, in world units per second.
+   * A slow pull still reaches the finger. A jump across the screen is absorbed
+   * over several frames so edges can be projected back under maxStretch.
+   */
+  grabSpeed: 11,
+  maxSpeed: 9,
+  /** Walls are inelastic, same idea as the floor: hit, shorten, stay. */
+  restitution: 0,
+  /** Fraction of wall penetration removed per contact pass. */
+  wallPush: 0.92,
   /** Floor contact removes the hit. A gummy shortens and stops. */
   floorPush: 0.95,
   /** Downward speed that starts a soft landing, so the body can shorten. */
@@ -59,6 +72,8 @@ export const PARAMS = {
   uprightK: 12,
   /** Share of the shape target taken from the full resting silhouette. */
   silhouette: 0.84,
+  /** While a hand is on the candy, let local clusters bend instead of standing the pose back up. */
+  silhouetteHeld: 0.28,
   /** Shape-matching spring strengths. Local clusters keep the shark recognizable. */
   globalK: 10,
   globalWeight: 0.28,
